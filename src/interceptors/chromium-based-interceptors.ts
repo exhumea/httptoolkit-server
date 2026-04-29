@@ -50,8 +50,15 @@ const getChromiumLaunchOptions = async (
         options: [
             // Trust our CA certificate's fingerprint:
             `--ignore-certificate-errors-spki-list=${spkiFingerprint}`,
-            // Disable annoying "What's New" page & side panel (and its annoying bookmarks popup)
-            '--disable-features=ChromeWhatsNewUI,SidePanelPinning',
+            // Disable annoying "What's New" page, side panel & bookmarks popup, and optimization downloads
+            '--disable-features=' + [
+                'ChromeWhatsNewUI',
+                'SidePanelPinning',
+                'OptimizationGuideModelDownloading',
+                'OptimizationHintsFetching',
+                'OptimizationTargetPrediction',
+                'OptimizationHints'
+            ].join(','),
             // Avoid annoying extra network noise:
             '--disable-background-networking',
             // Disable component update (without disabling components themselves, e.g. widevine)
@@ -59,13 +66,10 @@ const getChromiumLaunchOptions = async (
             '--component-updater=url-source=http://disabled-chromium-update.localhost:0',
             '--check-for-update-interval=31536000', // Don't update for a year
             ...(webExtensionEnabled && WEBEXTENSION_INSTALL
-                // Install HTTP Toolkit's extension, for advanced hook setup. Feature
-                // flagged for now as it's still new & largely untested.
                 ? [
                     `--load-extension=${WEBEXTENSION_INSTALL.path}`
                 ]
-                : []
-            )
+            : [])
         ]
     };
 }
