@@ -130,6 +130,29 @@ const PINNING_FIXES = {
         }
     ],
 
+    // --- Native Conscrypt CertificateTransparency
+
+    'com.android.org.conscrypt.ct.CertificateTransparency': [
+        {
+            methodName: 'checkCT',
+            replacement: () => NO_OP
+        }
+    ],
+
+    'org.conscrypt.ct.CertificateTransparency': [
+        {
+            methodName: 'checkCT',
+            replacement: () => NO_OP
+        }
+    ],
+
+    'com.google.android.gms.org.conscrypt.ct.CertificateTransparency': [
+        {
+            methodName: 'checkCT',
+            replacement: () => NO_OP
+        }
+    ],
+
     // --- Native pinning configuration loading (used for configuration by many libraries)
 
     'android.security.net.config.NetworkSecurityConfig': [
@@ -139,9 +162,21 @@ const PINNING_FIXES = {
             replacement: (targetMethod) => {
                 const PinSet = Java.use('android.security.net.config.PinSet');
                 const EMPTY_PINSET = PinSet.EMPTY_PINSET.value;
+
+                // The pins position in the constructor moves between Android versions (Android
+                // 15 inserted a certificate transparency argument) so match args by type:
+                const pinsIndex = targetMethod.argumentTypes.findIndex(
+                    (argType) => argType.className === 'android.security.net.config.PinSet'
+                );
+
+                if (pinsIndex === -1) {
+                    console.warn('[!] No PinSet argument in NetworkSecurityConfig constructor - ' +
+                        'config-defined certificate pinning will not be disabled');
+                }
+
                 return function () {
-                    // Always ignore the 2nd 'pins' PinSet argument entirely:
-                    arguments[2] = EMPTY_PINSET;
+                    // Always ignore the 'pins' PinSet argument entirely:
+                    if (pinsIndex !== -1) arguments[pinsIndex] = EMPTY_PINSET;
                     targetMethod.call(this, ...arguments);
                 }
             }
@@ -414,7 +449,9 @@ const PINNING_FIXES = {
         {
             methodName: 'checkServerTrusted',
             overload: ['[Ljava.security.cert.X509Certificate;', 'java.lang.String'],
-            replacement: CHECK_OUR_TRUST_MANAGER_ONLY,
+            replacement: CHECK_OUR_TRUST_MANAGER_ONLY
+        },
+        {
             methodName: 'checkServerTrusted',
             overload: ['[Ljava.security.cert.X509Certificate;', 'java.lang.String', 'java.lang.String'],
             replacement: () => {
@@ -433,7 +470,24 @@ const PINNING_FIXES = {
 
 const getJavaClassIfExists = (clsName) => {
     try {
-        return Java.use(clsName);
+        const TargetClass = Java.use(clsName);
+
+        // Hooks applied to a class that hasn't been initialized yet can be silently dropped when
+        // the runtime does eventually initialize it - patches then appear to apply, but never
+        // take effect (seen on Android 11 with app-bundled libraries, which are only initialized
+        // on first use, i.e. long after we get here). Initializing it now avoids that:
+        try {
+            Java.use('java.lang.Class').forName(
+                clsName,
+                true, // Initialize
+                TargetClass.class.getClassLoader()
+            );
+        } catch (e) {
+            // A class whose initializer fails is still worth patching, so this isn't fatal:
+            if (DEBUG_MODE) console.log(`[ ] Could not initialize ${clsName}: ${e.message}`);
+        }
+
+        return TargetClass;
     } catch {
         return undefined;
     }

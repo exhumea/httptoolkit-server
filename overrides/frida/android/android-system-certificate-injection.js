@@ -43,7 +43,8 @@ Java.perform(() => {
     [
         'com.android.org.conscrypt.TrustedCertificateIndex',
         'org.conscrypt.TrustedCertificateIndex', // Might be used (com.android is synthetic) - unclear
-        'org.apache.harmony.xnet.provider.jsse.TrustedCertificateIndex' // Used in Apache Harmony version of Conscrypt
+        'org.apache.harmony.xnet.provider.jsse.TrustedCertificateIndex', // Used in Apache Harmony version of Conscrypt
+        'com.google.android.gms.org.conscrypt.TrustedCertificateIndex', // Google Play Services bundled Conscrypt
     ].forEach((TrustedCertificateIndexClassname, i) => {
         let TrustedCertificateIndex;
         try {
@@ -60,24 +61,43 @@ Java.perform(() => {
             }
         }
 
-        TrustedCertificateIndex.$init.overloads.forEach((overload) => {
-            overload.implementation = function () {
-                this.$init(...arguments);
-                // Index our cert as already trusted, right from the start:
-                this.index(cert);
-            }
-        });
+        try {
+            // Every read of the index goes through one of its find* methods - the map behind them
+            // is private, and nothing outside Conscrypt itself touches it. So we hook those and
+            // index our cert in every case before any lookup happens.
+            // Note that hook $init instead doesn't work - in some cases (Android 8, where Conscrypt
+            // is AOT-compiled ahead of time) we miss some constructions.
+            const findMethodNames = new Set(
+                TrustedCertificateIndex.class.getDeclaredMethods()
+                    .map((method) => method.getName())
+                    .filter((methodName) => methodName.startsWith('find'))
+            );
 
-        TrustedCertificateIndex.reset.overloads.forEach((overload) => {
-            overload.implementation = function () {
-                const result = this.reset(...arguments);
-                // Index our cert in here again, since the reset removes it:
-                this.index(cert);
-                return result;
-            };
-        });
+            findMethodNames.forEach((methodName) => {
+                TrustedCertificateIndex[methodName].overloads
+                    .filter((overload) =>
+                        overload.argumentTypes.length === 1 &&
+                        overload.argumentTypes[0].className === 'java.security.cert.X509Certificate'
+                    )
+                    .forEach((overload) => {
+                        overload.implementation = function () {
+                            if (!this.findBySubjectAndPublicKey(cert)) {
+                                this.index(cert);
+                            }
 
-        if (DEBUG_MODE) console.log(`[+] Injected cert into ${TrustedCertificateIndexClassname}`);
+                            return overload.apply(this, arguments);
+                        };
+                    });
+            });
+
+            if (DEBUG_MODE) console.log(`[+] Injected cert into ${TrustedCertificateIndexClassname}`);
+        } catch (e) {
+            console.error(`[!] Error hooking system certificates via ${TrustedCertificateIndexClassname}:`);
+            console.error(DEBUG_MODE
+                ? e
+                : '    ' + e.message
+            );
+        }
     });
 
     // This effectively adds us to the system certs, and also defeats quite a bit of basic certificate
