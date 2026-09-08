@@ -41,7 +41,8 @@ export async function buildAndroidFridaScript(
             ['android', 'android-system-certificate-injection.js'],
             ['android', 'android-certificate-unpinning.js'],
             ['android', 'android-certificate-unpinning-fallback.js'],
-            ['android', 'android-disable-root-detection.js']
+            ['android', 'android-disable-root-detection.js'],
+            ['android', 'android-disable-flutter-certificate-pinning.js']
         ].map((hookRelPath) =>
             fs.readFile(path.join(FRIDA_SCRIPTS_ROOT, ...hookRelPath), { encoding: 'utf8' })
         )
