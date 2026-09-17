@@ -5,7 +5,23 @@ import { promisify } from 'util';
 
 import { getDeferred } from '@httptoolkit/util';
 
-import { getSocketPath } from './ui-operation-bridge';
+import { getSocketPath, REQUEST_TIMEOUT_MS } from './ui-operation-bridge';
+
+// Discovery requests are answered from memory, so a dead socket path has to fail
+// fast to leave time for the paths behind it:
+const DISCOVERY_TIMEOUT_MS = 2000;
+
+// Executing an operation means waiting for the UI, which the bridge itself allows
+// REQUEST_TIMEOUT_MS to answer. Staying just above that keeps that budget usable
+// and lets the bridge's own error - which names the operation - reach the caller,
+// instead of failing here first with a bare ETIMEDOUT.
+const EXECUTE_TIMEOUT_MS = REQUEST_TIMEOUT_MS + 5000;
+
+export function requestTimeout(urlPath: string): number {
+    return urlPath === '/api/execute'
+        ? EXECUTE_TIMEOUT_MS
+        : DISCOVERY_TIMEOUT_MS;
+}
 
 const execFileAsync = promisify(execFile);
 let darwinTempDirPromise: Promise<string | undefined> | undefined;
@@ -70,7 +86,7 @@ export async function apiRequest(
     throw createBridgeConnectionError(socketAttempts);
 }
 
-function socketRequest(
+export function socketRequest(
     socketPath: string,
     method: 'GET' | 'POST',
     urlPath: string,
@@ -84,7 +100,7 @@ function socketRequest(
         headers: {
             'Content-Type': 'application/json'
         },
-        timeout: 2000
+        timeout: requestTimeout(urlPath)
     }, (res) => {
         const chunks: Buffer[] = [];
         res.on('error', (err: any) => {
