@@ -43,7 +43,7 @@ interface PendingRequest {
     timer: ReturnType<typeof setTimeout>;
 }
 
-const REQUEST_TIMEOUT_MS = 30_000;
+export const REQUEST_TIMEOUT_MS = 30_000;
 
 export async function getSocketPath(): Promise<string> {
     if (process.platform === 'win32') {
